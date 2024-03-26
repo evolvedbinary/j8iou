@@ -26,38 +26,91 @@
  */
 package com.evolvedbinary.j8iou.nio;
 
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class MultiplexedMappedByteBufferTest {
 
-  @ClassRule public static final TemporaryFolder TEMP_FOLDER = new TemporaryFolder();
+  @TempDir
+  Path tempFolder;
 
-  @Test
-  public void calcBufferSize() {
-    assertEquals(20, MultiplexedMappedByteBuffer.calcBufferSize(10, 20, 30));
-    assertEquals(20, MultiplexedMappedByteBuffer.calcBufferSize(20, 20, 30));
-
-    assertEquals(10, MultiplexedMappedByteBuffer.calcBufferSize(10, 5, 30));
-    assertEquals(5, MultiplexedMappedByteBuffer.calcBufferSize(5, 5, 30));
-
-    assertEquals(30, MultiplexedMappedByteBuffer.calcBufferSize(40, 20, 30));
-    assertEquals(30, MultiplexedMappedByteBuffer.calcBufferSize(30, 20, 30));
+  @ParameterizedTest(name = "[{index}] {0}")
+  @CsvSource({
+      "requested less than min,       10, 20, 30,   20",
+      "requested equal min,           20, 20, 30,   20",
+      "requested between min and max, 20, 10, 30,   20",
+      "requested equal max,           20, 10, 20,   20",
+      "requested greater than max,    30, 10, 20,   20",
+  })
+  void calcBufferSize(final String name, final long requested, final long min, final long max, final long expected) {
+    assertEquals(expected, MultiplexedMappedByteBuffer.calcBufferSize(requested, min, max));
   }
 
+  @ParameterizedTest(name = "[{index}] {0}")
+  @CsvSource({
+      "requested less than min / read from 512,         10, 20, 30, 512,      20",
+      "requested less than min / read from 1024,        10, 20, 30, 1024,     20",
+      "requested equal min / read from 2048,            20, 20, 30, 2048,     20",
+      "requested between min and max / read from 512,   20, 10, 30, 512,      20",
+      "requested equal max / read from 1024,            20, 10, 20, 1024,     20",
+      "requested greater than max / read from 2048,     30, 10, 20, 2048,     20",
+  })
+  void mapRegion(final String name, final long requested, final long min, final long max, final long position, final long expected) throws IOException {
+    final Path path = tempFolder.resolve("mapRegion.bin");
+    try (final FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.READ)) {
+      final MappedByteBuffer mappedByteBuffer = MultiplexedMappedByteBuffer.mapRegion(fileChannel, FileChannel.MapMode.READ_WRITE, requested, min, max, position);
+      assertEquals(expected, mappedByteBuffer.capacity());
+      assertEquals(0, mappedByteBuffer.position());
+      assertEquals(expected, mappedByteBuffer.remaining());
+
+      final byte empty[] = new byte[(int) expected];
+
+      final byte data[] = Arrays.copyOf(empty, empty.length);
+      mappedByteBuffer.get(data, 0, (int) expected);
+
+      assertArrayEquals(empty, data);
+    }
+  }
+
+  @ParameterizedTest(name = "[{index}] {0}")
+  @CsvSource({
+      "zero capacity,                             0, 10, 0,      true",
+      "exact capacity,                            0, 10, 10,     false",
+      "under capacity,                            0, 10, 100,    false",
+      "over capacity,                             0, 100, 10,    true",
+      "negative offset,                           -1, 10, 10,    true",
+      "offset at capacity,                        10, 10, 10,    true",
+      "offset out-of-bounds,                      11, 10, 10,    true",
+      "offset out-of-bounds and over capacity,    11, 11, 10,    true",
+  })
+  void checkBounds(final String name, final int offset, final int length, final int capacity, final boolean exceptionExpected) {
+    assertThrowsOrNot(exceptionExpected, IndexOutOfBoundsException.class, () ->
+        MultiplexedMappedByteBuffer.checkBounds(offset, length, capacity)
+    );
+  }
+
+  // TODO(AR) add further tests for Region and its methods
+
   @Test
-  public void createFileNonZeroPosition() throws IOException {
-    //final Path path = TEMP_FOLDER.getRoot().toPath().resolve("createFileNonZeroPosition.bin");
-    final Path path = Paths.get("/tmp").resolve("createFileNonZeroPosition.bin");
+  void createFileNonZeroPosition() throws IOException {
+    final Path path = tempFolder.resolve("createFileNonZeroPosition.bin");
+
     try (final FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.READ)) {
 
       try (final MultiplexedMappedByteBuffer buffer = MultiplexMappedByteBuffer.fileChannel(fileChannel)
@@ -65,12 +118,21 @@ public class MultiplexedMappedByteBufferTest {
           .initialPosition(8)
           .build()) {
 
-        buffer.put((byte)'a');
+        // TODO(AR) implement multi-byte buf - but before that write the tests for read(byte[], int, int)
+        buffer.put((byte) 'a');
 
-        System.out.println(buffer.position());
+        // TODO(AR) shouldn't the put above have advanced the position? check if that should be so and possibly fix it...
 
+        assertEquals(9, buffer.position());
       }
     }
-    System.out.println(path);
+  }
+
+  private static <T extends Throwable> void assertThrowsOrNot(final boolean mustThrow, final Class<T> expectedType, final Executable executable) {
+    if (mustThrow) {
+      assertThrows(expectedType, executable);
+    } else {
+      assertDoesNotThrow(executable);
+    }
   }
 }
