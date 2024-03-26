@@ -319,7 +319,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     if (nextFcPosition > fcPosition) {
       // We look forward...
       for (int i = activeRegionIdx; i < usedRegions; i++) {
-        if (withinRegion(regions[i], nextFcPosition)) {
+        if (regions[i].encompasses(nextFcPosition)) {
           return i;
         }
       }
@@ -327,7 +327,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     } else if (nextFcPosition < fcPosition) {
       // We look backward...
       for (int i = activeRegionIdx; i > -1; i--) {
-        if (withinRegion(regions[i], nextFcPosition)) {
+        if (regions[i].encompasses(nextFcPosition)) {
           return i;
         }
       }
@@ -392,7 +392,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     if (nextFcPosition > fcPosition) {
       // We look forward...
       for (int i = activeRegionIdx; i < usedRegions; i++) {
-        if (isRegionBefore(regions[i], nextFcPosition)) {
+        if (regions[i].isBefore(nextFcPosition)) {
           closestBeforeRegionIdx = i;
         } else {
           break;
@@ -402,7 +402,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     } else if (nextFcPosition <= fcPosition) {
       // We look backward...
       for (int i = activeRegionIdx; i > -1; i--) {
-        if (isRegionBefore(regions[i], nextFcPosition)) {
+        if (regions[i].isBefore(nextFcPosition)) {
           closestBeforeRegionIdx = i;
           break;
         }
@@ -422,7 +422,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     if (nextFcPosition >= fcPosition) {
       // We look forward...
       for (int i = activeRegionIdx; i < usedRegions; i++) {
-        if (isRegionAfter(regions[i], nextFcPosition)) {
+        if (regions[i].isAfter(nextFcPosition)) {
           closestAfterRegionIdx = i;
           break;
         }
@@ -431,7 +431,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     } else if (nextFcPosition < fcPosition) {
       // We look backward...
       for (int i = activeRegionIdx; i > -1; i--) {
-        if (isRegionAfter(regions[i], nextFcPosition)) {
+        if (regions[i].isAfter(nextFcPosition)) {
           closestAfterRegionIdx = i;
         } else {
           break;
@@ -459,21 +459,6 @@ public class MultiplexedMappedByteBuffer implements Closeable {
 
     // record that we now have a free region
     usedRegions--;
-  }
-
-  static boolean isRegionBefore(final Region region, final long position) {
-    // TODO should this be `<` or `<=` instead?
-    return region.end() < position;
-  }
-
-  static boolean isRegionAfter(final Region region, final long position) {
-    // TODO should this be `>` or `>=` instead?
-    return region.fcPosition > position;
-  }
-
-  static boolean withinRegion(final Region region, final long position) {
-    // TODO should this be `<=` or just `<` ?
-    return position >= region.fcPosition && position <= region.end();
   }
 
   static void checkBounds(final int off, final int len, final int size) {
@@ -546,6 +531,22 @@ public class MultiplexedMappedByteBuffer implements Closeable {
 
     public long end() {
       return fcPosition + buffer.capacity();
+    }
+
+    public boolean isBefore(final long fcPosition) {
+      // TODO should this be `<` or `<=` instead?
+      return end() < fcPosition;
+    }
+
+    public boolean isAfter(final long fcPosition) {
+      // TODO should this be `>` or `>=` instead?
+      return this.fcPosition > fcPosition;
+    }
+
+    public boolean encompasses(final long fcPosition) {
+      // TODO should this be `<=` or just `<` ?
+      return fcPosition >= this.fcPosition
+          && fcPosition <= end();
     }
 
     public void incrementUseCount() {
