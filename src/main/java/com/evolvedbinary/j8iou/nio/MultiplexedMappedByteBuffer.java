@@ -519,7 +519,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     public final MappedByteBuffer buffer;
 
     /**
-     * Number of times this buffer has been read from.
+     * Number of times this buffer has been read from or written to.
      * Used for LFU management of {@link MultiplexedMappedByteBuffer#regions}.
      */
     private long useCount;
