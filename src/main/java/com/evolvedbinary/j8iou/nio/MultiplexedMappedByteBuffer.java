@@ -127,7 +127,9 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     // attempt to map the first buffer from the initial position, if there is a problem, an IOException will be thrown
     final MappedByteBuffer initialBuffer = mapRegion(fileChannel, mapMode, fileChannel.size(), minBufferSize, maxBufferSize, initialPosition);
 
-    return new MultiplexedMappedByteBuffer(fileChannel, mapMode, minBufferSize, maxBufferSize, maxBuffers, initialPosition, initialBuffer);
+
+    // NOTE(AR) we use fileChannel.position() below instead of initialPosition as a new file will always start from zero, otherwise if it is an existing file this will be correct anyway
+    return new MultiplexedMappedByteBuffer(fileChannel, mapMode, minBufferSize, maxBufferSize, maxBuffers, fileChannel.position(), initialBuffer);
   }
 
   /**
@@ -570,18 +572,47 @@ public class MultiplexedMappedByteBuffer implements Closeable {
           && fcPosition < end();
     }
 
+    /**
+     * Increment the use count of this region.
+     */
     public void incrementUseCount() {
       if (useCount != Long.MAX_VALUE) {
         useCount++;
       }
     }
 
+    /**
+     * Get the use count of this region.
+     *
+     * @return the use count.
+     */
     public long useCount() {
       return useCount;
+    }
+
+    /* Below here are package-private methods for accessing/modifying state in Unit Tests */
+    void setUseCount(final long useCount) {
+      this.useCount = useCount;
     }
   }
 
   /* Below here are package-private methods for accessing state in Unit Tests */
+  FileChannel fileChannel() {
+    return fileChannel;
+  }
+
+  MapMode mapMode() {
+    return mapMode;
+  }
+
+  long minBufferSize() {
+    return minBufferSize;
+  }
+
+  long maxBufferSize() {
+    return maxBufferSize;
+  }
+
   Region[] regions() {
     return regions;
   }
@@ -592,5 +623,13 @@ public class MultiplexedMappedByteBuffer implements Closeable {
 
   int activeRegionIdx() {
     return activeRegionIdx;
+  }
+
+  long fcPosition() {
+    return fcPosition;
+  }
+
+  long nextFcPosition() {
+    return nextFcPosition;
   }
 }

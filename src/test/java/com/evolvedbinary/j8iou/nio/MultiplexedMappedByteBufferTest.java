@@ -31,24 +31,118 @@ import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
+import java.util.Random;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class MultiplexedMappedByteBufferTest {
 
   @TempDir
   Path tempFolder;
+
+  @ParameterizedTest(name = "[{index}] create(initialPosition={0})")
+  @ValueSource(longs = {-1, -2, Long.MIN_VALUE})
+  void createNegativeInitialPosition(final long initialPosition) {
+    assertThrows(IllegalArgumentException.class, () ->
+      MultiplexedMappedByteBuffer.create(null, FileChannel.MapMode.READ_WRITE, 1024, 4096, 10, initialPosition)
+    );
+  }
+
+  @ParameterizedTest(name = "[{index}] create(minBufferSize={0}, maxBufferSize={1}, maxBuffers={2}, initialPosition={3})")
+  @CsvSource({
+      "512,  2048,  5,  0",
+      "1024, 16384, 10, 0",
+      "2048, 4096,  20, 0",
+      "512,  2048,  5,  512",
+      "1024, 16384, 10, 1024",
+      "2048, 4096,  20, 2048",
+  })
+  void createNewFile(final long minBufferSize, final long maxBufferSize, final int maxBuffers, final long initialPosition) throws IOException {
+    final Path path = tempFolder.resolve("createNewFile.bin");
+
+    try (final FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.READ)) {
+      try (final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(fileChannel, FileChannel.MapMode.READ_WRITE, minBufferSize, maxBufferSize, maxBuffers, initialPosition)) {
+        // check the file channel and positions
+        assertEquals(fileChannel, buffer.fileChannel());
+        assertEquals(FileChannel.MapMode.READ_WRITE, buffer.mapMode());
+        // NOTE(AR) initial position in a new file will always be zero, regardless of what was requested
+        assertEquals(0, buffer.fileChannel().position());
+        assertEquals(0, buffer.position());
+        assertEquals(0, buffer.fcPosition());
+        assertEquals(0, buffer.nextFcPosition());
+
+        // check min and max buffer sizes
+        assertEquals(minBufferSize, buffer.minBufferSize());
+        assertEquals(maxBufferSize, buffer.maxBufferSize());
+
+        // check space is allocated for maxBuffers in regions
+        final MultiplexedMappedByteBuffer.Region actualRegions[] = buffer.regions();
+        assertEquals(maxBuffers, actualRegions.length);
+
+        // check only the first region holds a buffer and that the rest are null
+        assertEquals(1, buffer.usedRegions());
+        final MultiplexedMappedByteBuffer.Region firstActualRegion = actualRegions[0];
+        assertNotNull(firstActualRegion);
+        assertArrayEquals(new MultiplexedMappedByteBuffer.Region[maxBuffers - 1], Arrays.copyOfRange(actualRegions, 1, maxBuffers));
+
+        // check that the first region is set up correctly
+        assertEquals(0, firstActualRegion.fcPosition);
+        assertEquals(0, firstActualRegion.buffer.position());
+        assertEquals(minBufferSize, firstActualRegion.buffer.capacity());
+        assertEquals(minBufferSize, firstActualRegion.buffer.remaining());
+
+        // check the active region is the first region
+        assertEquals(0, buffer.activeRegionIdx());
+      }
+    }
+  }
+
+  @ParameterizedTest(name = "[{index}] position({0})")
+  @ValueSource(longs = {-1, -2, Long.MIN_VALUE})
+  void negativePosition(final long position) throws IOException {
+    final Path path = tempFolder.resolve("negativePosition.bin");
+    try (final FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.READ)) {
+      try (final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(fileChannel, FileChannel.MapMode.READ_WRITE, 1024, 2048, 10, 0)) {
+        assertEquals(0, buffer.position());
+        assertEquals(0, buffer.fcPosition());
+        assertEquals(0, buffer.nextFcPosition());
+
+        // trying to set a negative position throws an exception
+        assertThrows(IllegalArgumentException.class, () ->
+            buffer.position(position)
+        );
+      }
+    }
+  }
+
+  @ParameterizedTest(name = "[{index}] position({0})")
+  @ValueSource(longs = {0, 256, 512, 1024, 2048, 4096, 8192, 16384})
+  void position(final long position) throws IOException {
+    final Path path = tempFolder.resolve("position.bin");
+
+    try (final FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.READ)) {
+      try (final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(fileChannel, FileChannel.MapMode.READ_WRITE, 1024, 2048, 10, 0)) {
+        assertEquals(0, buffer.position());
+        assertEquals(0, buffer.fcPosition());
+        assertEquals(0, buffer.nextFcPosition());
+
+        // changing the position only records what the next position will be
+        buffer.position(position);
+        assertEquals(position, buffer.position());
+        assertEquals(0, buffer.fcPosition());
+        assertEquals(position, buffer.nextFcPosition());
+      }
+    }
+  }
 
   @ParameterizedTest(name = "[{index}] {0}")
   @CsvSource({
@@ -104,6 +198,8 @@ public class MultiplexedMappedByteBufferTest {
         MultiplexedMappedByteBuffer.checkBounds(offset, length, capacity)
     );
   }
+
+  // TODO(AR) add further tests for member methods of MultiplexedMappedByteBuffer
 
   @ParameterizedTest(name = "[{index}] is region from position {0} with capacity {1} before file position {2} equals {3}")
   @CsvSource({
@@ -1238,7 +1334,26 @@ public class MultiplexedMappedByteBufferTest {
     final MultiplexedMappedByteBuffer.Region region = new MultiplexedMappedByteBuffer.Region(regionFcPosition, buffer);
     assertEquals(expected, region.encompasses(fcPosition));
   }
-  // TODO(AR) add further tests for Region and its methods
+
+  @Test
+  void regionUseCount() {
+    // check that useCount is initialised to zero
+    final MultiplexedMappedByteBuffer.Region region = new MultiplexedMappedByteBuffer.Region(0, null);
+    assertEquals(0, region.useCount());
+
+    // check that useCount is incremented correctly
+    final int count = new Random().nextInt(512);
+    for (int i  = 0; i <  count; i++) {
+      region.incrementUseCount();
+    }
+    assertEquals(count, region.useCount());
+
+    // check that useCount cannot exceed Long.MAX_VALUE
+    region.setUseCount(Long.MAX_VALUE);
+    assertEquals(Long.MAX_VALUE, region.useCount());
+    region.incrementUseCount();
+    assertEquals(Long.MAX_VALUE, region.useCount());
+  }
 
   @Test
   void createFileNonZeroPosition() throws IOException {
