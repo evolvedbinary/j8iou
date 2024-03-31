@@ -514,7 +514,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
 //    invokeCleaner.invoke(unsafe, mappedBuffer);
   }
 
-  private static final class Region {
+  static class Region {
     public final long fcPosition;
     public final MappedByteBuffer buffer;
 
@@ -533,20 +533,41 @@ public class MultiplexedMappedByteBuffer implements Closeable {
       return fcPosition + buffer.capacity();
     }
 
+    /**
+     * Returns true if the extent of this region ends before the provided position.
+     *
+     * @param fcPosition the file channel position.
+     *
+     * @return true, if the extent of this region ends before the provided position, false otherwise.
+     */
     public boolean isBefore(final long fcPosition) {
       // TODO should this be `<` or `<=` instead?
       return end() < fcPosition;
     }
 
+    /**
+     * Returns true if this region starts after the provided position.
+     *
+     * @param fcPosition the file channel position.
+     *
+     * @return true, if this region starts after the provided position, false otherwise.
+     */
     public boolean isAfter(final long fcPosition) {
       // TODO should this be `>` or `>=` instead?
       return this.fcPosition > fcPosition;
     }
 
+    /**
+     * Returns true of this region encompasses the provided position.
+     *
+     * @param fcPosition the file channel position.
+     *
+     * @return true, if this region encompasses the provided position, false otherwise.
+     */
     public boolean encompasses(final long fcPosition) {
-      // TODO should this be `<=` or just `<` ?
-      return fcPosition >= this.fcPosition
-          && fcPosition <= end();
+      // TODO should this be `<` or `<=` ?
+      return buffer.capacity() > 0 && fcPosition >= this.fcPosition
+          && fcPosition < end();
     }
 
     public void incrementUseCount() {
