@@ -95,7 +95,8 @@ public class MultiplexedMappedByteBufferTest {
         assertArrayEquals(new MultiplexedMappedByteBuffer.Region[maxBuffers - 1], Arrays.copyOfRange(actualRegions, 1, maxBuffers));
 
         // check that the first region is set up correctly
-        assertEquals(0, firstActualRegion.fcPosition);
+        assertEquals(0, firstActualRegion.fcPositionStart);
+        assertEquals(minBufferSize - 1, firstActualRegion.fcPositionEnd);
         assertEquals(0, firstActualRegion.buffer.position());
         assertEquals(minBufferSize, firstActualRegion.buffer.capacity());
         assertEquals(minBufferSize, firstActualRegion.buffer.remaining());
@@ -210,35 +211,35 @@ public class MultiplexedMappedByteBufferTest {
       "0, 0, 1024,        true",
       "0, 0, 2048,        true",
       "0, 1, 0,           false",
-      "0, 1, 1,           false",
+      "0, 1, 1,           true",
       "0, 1, 2,           true",
       "0, 1, 512,         true",
       "0, 1, 1024,        true",
       "0, 1, 2048,        true",
       "0, 2, 0,           false",
       "0, 2, 1,           false",
-      "0, 2, 2,           false",
+      "0, 2, 2,           true",
       "0, 2, 512,         true",
       "0, 2, 1024,        true",
       "0, 2, 2048,        true",
       "0, 512, 0,         false",
       "0, 512, 1,         false",
       "0, 512, 2,         false",
-      "0, 512, 512,       false",
+      "0, 512, 512,       true",
       "0, 512, 1024,      true",
       "0, 512, 2048,      true",
       "0, 1024, 0,        false",
       "0, 1024, 1,        false",
       "0, 1024, 2,        false",
       "0, 1024, 512,      false",
-      "0, 1024, 1024,     false",
+      "0, 1024, 1024,     true",
       "0, 1024, 2048,     true",
       "0, 2048, 0,        false",
       "0, 2048, 1,        false",
       "0, 2048, 2,        false",
       "0, 2048, 512,      false",
       "0, 2048, 1024,     false",
-      "0, 2048, 2048,     false",
+      "0, 2048, 2048,     true",
 
       "1, 0, 0,           false",
       "1, 0, 1,           false",
@@ -248,7 +249,7 @@ public class MultiplexedMappedByteBufferTest {
       "1, 0, 2048,        true",
       "1, 1, 0,           false",
       "1, 1, 1,           false",
-      "1, 1, 2,           false",
+      "1, 1, 2,           true",
       "1, 1, 512,         true",
       "1, 1, 1024,        true",
       "1, 1, 2048,        true",
@@ -336,7 +337,7 @@ public class MultiplexedMappedByteBufferTest {
       "512, 512, 1,         false",
       "512, 512, 2,         false",
       "512, 512, 512,       false",
-      "512, 512, 1024,      false",
+      "512, 512, 1024,      true",
       "512, 512, 2048,      true",
       "512, 1024, 0,        false",
       "512, 1024, 1,        false",
@@ -380,7 +381,7 @@ public class MultiplexedMappedByteBufferTest {
       "1024, 1024, 2,        false",
       "1024, 1024, 512,      false",
       "1024, 1024, 1024,     false",
-      "1024, 1024, 2048,     false",
+      "1024, 1024, 2048,     true",
       "1024, 2048, 0,        false",
       "1024, 2048, 1,        false",
       "1024, 2048, 2,        false",
@@ -405,7 +406,7 @@ public class MultiplexedMappedByteBufferTest {
       "2046, 2, 2,           false",
       "2046, 2, 512,         false",
       "2046, 2, 1024,        false",
-      "2046, 2, 2048,        false",
+      "2046, 2, 2048,        true",
       "2046, 512, 0,         false",
       "2046, 512, 1,         false",
       "2046, 512, 2,         false",
@@ -436,7 +437,7 @@ public class MultiplexedMappedByteBufferTest {
       "2047, 1, 2,           false",
       "2047, 1, 512,         false",
       "2047, 1, 1024,        false",
-      "2047, 1, 2048,        false",
+      "2047, 1, 2048,        true",
       "2047, 2, 0,           false",
       "2047, 2, 1,           false",
       "2047, 2, 2,           false",
@@ -561,8 +562,8 @@ public class MultiplexedMappedByteBufferTest {
       "2050, 512, 1024,      false",
       "2050, 512, 2048,      false",
       "2050, 1024, 0,        false",
-      "2050, 1024, 1,           false",
-      "2050, 1024, 2,           false",
+      "2050, 1024, 1,        false",
+      "2050, 1024, 2,        false",
       "2050, 1024, 512,      false",
       "2050, 1024, 1024,     false",
       "2050, 1024, 2048,     false",
@@ -1337,8 +1338,10 @@ public class MultiplexedMappedByteBufferTest {
 
   @Test
   void regionUseCount() {
+    final ByteBuffer mockBuffer = ByteBuffer.allocateDirect(0);
+
     // check that useCount is initialised to zero
-    final MultiplexedMappedByteBuffer.Region region = new MultiplexedMappedByteBuffer.Region(0, null);
+    final MultiplexedMappedByteBuffer.Region region = new MultiplexedMappedByteBuffer.Region(0, (MappedByteBuffer) mockBuffer);
     assertEquals(0, region.useCount());
 
     // check that useCount is incremented correctly

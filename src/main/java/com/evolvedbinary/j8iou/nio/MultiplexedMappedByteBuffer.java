@@ -292,7 +292,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
 
     // 4. Read from the buffer of the underlying region
     final Region region = regions[activeRegionIdx];
-    final long regionOffset = fcPosition - region.fcPosition;
+    final long regionOffset = fcPosition - region.fcPositionStart;
     // sanity check
     if (regionOffset > Integer.MAX_VALUE) {
       throw new IndexOutOfBoundsException("Region offset is out of bounds");
@@ -365,7 +365,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     }
 
     // calc the maximum requestable space between the needed position and the start of the next region
-    final long maxRequestableSpace = regions[afterRegionIdx].fcPosition - nextFcPosition;
+    final long maxRequestableSpace = regions[afterRegionIdx].fcPositionStart - nextFcPosition;
 
     // right shift each item in the regions array by one from afterRegionIdx
     for (int i = usedRegions; i > beforeRegionIdx; i--) {
@@ -517,7 +517,21 @@ public class MultiplexedMappedByteBuffer implements Closeable {
   }
 
   static class Region {
-    public final long fcPosition;
+    /**
+     * The offset (inclusive) in the underlying file-channel
+     * that this Region starts mapping from.
+     */
+    public final long fcPositionStart;
+
+    /**
+     * The offset (inclusive) in the underlying file-channel
+     * that this region finishes mapping at.
+     */
+    public final long fcPositionEnd;
+
+    /**
+     * The memory-mapped buffer for this region.
+     */
     public final MappedByteBuffer buffer;
 
     /**
@@ -526,13 +540,16 @@ public class MultiplexedMappedByteBuffer implements Closeable {
      */
     private long useCount;
 
-    public Region(final long fcPosition, final MappedByteBuffer buffer) {
-      this.fcPosition = fcPosition;
+    /**
+     * Construct a new Region.
+     *
+     * @param fcPositionStart the offset (inclusive) in the underlying file-channel that this Region starts mapping from.
+     * @param buffer the memory-mapped buffer for this region.
+     */
+    public Region(final long fcPositionStart, final MappedByteBuffer buffer) {
+      this.fcPositionStart = fcPositionStart;
+      this.fcPositionEnd = fcPositionStart + Math.max(0, buffer.capacity() - 1);
       this.buffer = buffer;
-    }
-
-    public long end() {
-      return fcPosition + buffer.capacity();
     }
 
     /**
@@ -543,8 +560,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
      * @return true, if the extent of this region ends before the provided position, false otherwise.
      */
     public boolean isBefore(final long fcPosition) {
-      // TODO should this be `<` or `<=` instead?
-      return end() < fcPosition;
+      return this.fcPositionEnd < fcPosition;
     }
 
     /**
@@ -555,8 +571,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
      * @return true, if this region starts after the provided position, false otherwise.
      */
     public boolean isAfter(final long fcPosition) {
-      // TODO should this be `>` or `>=` instead?
-      return this.fcPosition > fcPosition;
+      return this.fcPositionStart > fcPosition;
     }
 
     /**
@@ -567,9 +582,8 @@ public class MultiplexedMappedByteBuffer implements Closeable {
      * @return true, if this region encompasses the provided position, false otherwise.
      */
     public boolean encompasses(final long fcPosition) {
-      // TODO should this be `<` or `<=` ?
-      return buffer.capacity() > 0 && fcPosition >= this.fcPosition
-          && fcPosition < end();
+      return buffer.capacity() > 0 && fcPosition >= this.fcPositionStart
+          && fcPosition <= this.fcPositionEnd;
     }
 
     /**
