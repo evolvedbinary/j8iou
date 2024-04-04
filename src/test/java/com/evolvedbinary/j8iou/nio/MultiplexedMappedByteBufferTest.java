@@ -1483,42 +1483,51 @@ public class MultiplexedMappedByteBufferTest {
     });
   }
 
-  @ParameterizedTest(name = "[{index}] getAllSequential(sequenceLength={0}, iterations={1}, minBufferSize={2}, maxBufferSize={3}, maxBuffers{4})")
+  @ParameterizedTest(name = "[{index}] getAllSequential(sequenceLength={0}, iterations={1}, minBufferSize={2}, maxBufferSize={3}, maxBuffers={4})")
   @CsvSource({
       "1, 1, 0, 2, 1",
       "1, 1, 1, 1, 1",
+      "1, 2, 1, 1, 1",
       "1, 2, 1, 1, 2",
 
       "2, 2, 1, 4, 2",
       "2, 2, 2, 2, 2",
+      "2, 4, 2, 2, 2",
       "2, 4, 2, 2, 4",
 
       "4, 4, 2, 8, 4",
       "4, 4, 4, 4, 4",
+      "4, 8, 4, 4, 4",
       "4, 8, 4, 4, 8",
 
       "8, 8,  4, 16, 8",
       "8, 8,  8, 8,  8",
+      "8, 16, 8, 8,  8",
       "8, 16, 8, 8,  16",
 
       "16, 16, 8,  32, 16",
       "16, 16, 16, 16, 16",
+      "16, 32, 16, 16, 16",
       "16, 32, 16, 16, 32",
 
       "32, 32, 16, 64, 32",
       "32, 32, 32, 32, 32",
+      "32, 64, 32, 32, 32",
       "32, 64, 32, 32, 64",
 
       "64, 64,  32, 128, 64",
       "64, 64,  64, 64,  64",
+      "64, 128, 64, 64,  64",
       "64, 128, 64, 64,  128",
 
       "128, 128, 64,  256, 128",
       "128, 128, 128, 128, 128",
+      "128, 256, 128, 128, 128",
       "128, 256, 128, 128, 256",
 
       "256, 256, 128, 512, 256",
       "256, 256, 256, 256, 256",
+      "256, 512, 256, 256, 256",
       "256, 512, 256, 256, 512",
   })
   void getAllSequential(final short sequenceLength, final int iterations, final long minBufferSize, final long maxBufferSize, final int maxBuffers) throws IOException {
@@ -1546,6 +1555,8 @@ public class MultiplexedMappedByteBufferTest {
           throw new UnsupportedOperationException("This test is not designed to accommodate regions that are smaller than the read buffer");
         }
         final int regionToReadBufferRatio = (int)expectedRegionSize / (int)readBufferSize;
+        // do we need to read more data than that provided by maxBuffers, if so buffers will be evicted and new ones mapped in as we go
+        final boolean willEvictRegions = maxBuffers * expectedRegionSize < iterations * readBufferSize;
 
         // attempt to read blocks of actualBufferSize bytes and check they are the same as the source file
         try (final InputStream expectedIs = Files.newInputStream(sourceFile, StandardOpenOption.READ)) {
@@ -1567,7 +1578,11 @@ public class MultiplexedMappedByteBufferTest {
             assertArrayEquals(expected, actual);
 
             // check status of region within the MultiplexedMappedByteBuffer
-            final int expectedActiveRegionIdx = i / regionToReadBufferRatio;
+            int expectedActiveRegionIdx = i / regionToReadBufferRatio;
+            if (willEvictRegions) {
+              // if we need to evict and reuse regions because maxBuffers is not enough to read all bytes without eviction, in a sequential read it will always be the last region that is evicted!
+              expectedActiveRegionIdx = Math.min(expectedActiveRegionIdx, maxBuffers - 1);
+            }
             assertEquals(expectedActiveRegionIdx, buffer.activeRegionIdx());
             assertEquals(expectedActiveRegionIdx + 1, buffer.usedRegions());
             final MultiplexedMappedByteBuffer.Region region = buffer.regions()[expectedActiveRegionIdx];
@@ -1584,14 +1599,30 @@ public class MultiplexedMappedByteBufferTest {
         }
 
         // check final status of all regions within the MultiplexedMappedByteBuffer
-        final int expectedUsedRegions = iterations / regionToReadBufferRatio;
+        int expectedUsedRegions = iterations / regionToReadBufferRatio;
+        if (willEvictRegions) {
+          // if we need to evict and reuse regions because maxBuffers is not enough to read all bytes without eviction, in a sequential read it will always be the last region that is evicted!
+          expectedUsedRegions = Math.min(expectedUsedRegions, maxBuffers);
+        }
         assertEquals(expectedUsedRegions, buffer.usedRegions());
         assertEquals(expectedUsedRegions - 1, buffer.activeRegionIdx());
 
         for (int i = 0; i < expectedUsedRegions; i++) {
           final MultiplexedMappedByteBuffer.Region region = buffer.regions()[i];
-          assertEquals(i * expectedRegionSize, region.fcPositionStart);
-          assertEquals(((i + 1) * expectedRegionSize) - 1, region.fcPositionEnd);
+          final long expectedRegionStart;
+          if (willEvictRegions && i == expectedUsedRegions - 1) {
+            expectedRegionStart = maxBuffers * (expectedRegionSize * 2) - expectedRegionSize;
+          } else {
+            expectedRegionStart = i * expectedRegionSize;
+          }
+          assertEquals(expectedRegionStart, region.fcPositionStart);
+          final long expectedRegionEnd;
+          if (willEvictRegions && i == expectedUsedRegions - 1) {
+            expectedRegionEnd = maxBuffers * (expectedRegionSize * 2) - 1;
+          } else {
+            expectedRegionEnd = ((i + 1) * expectedRegionSize) - 1;
+          }
+          assertEquals(expectedRegionEnd, region.fcPositionEnd);
           assertEquals(expectedRegionSize, region.buffer.capacity());
           assertEquals(expectedRegionSize, region.buffer.position());
           assertEquals(0, region.buffer.remaining());
