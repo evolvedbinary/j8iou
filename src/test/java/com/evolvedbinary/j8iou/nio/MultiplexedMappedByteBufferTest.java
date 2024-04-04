@@ -1370,6 +1370,79 @@ public class MultiplexedMappedByteBufferTest {
     assertEquals(Long.MAX_VALUE, region.useCount());
   }
 
+  @ParameterizedTest
+  @CsvSource({
+      "1,   0",
+      "2,   0",
+      "2,   1",
+      "4,   0",
+      "4,   1",
+      "4,   2",
+      "4,   3",
+      "8,   0",
+      "8,   1",
+      "8,   2",
+      "8,   3",
+      "8,   4",
+      "8,   5",
+      "8,   6",
+      "8,   7",
+      "16,  0",
+      "16,  1",
+      "16,  2",
+      "16,  3",
+      "16,  4",
+      "16,  5",
+      "16,  6",
+      "16,  7",
+      "16,  8",
+      "16,  9",
+      "16,  10",
+      "16,  11",
+      "16,  12",
+      "16,  13",
+      "16,  14",
+      "16,  15",
+  })
+  void getLfuRegionIndex(final int numberOfRegions, final int expectedLfuIndex) {
+    final MultiplexedMappedByteBuffer.Region regions[] = constructRegionsForLfuTest(numberOfRegions, expectedLfuIndex);
+    final int actualLfuIndex = MultiplexedMappedByteBuffer.getLfuRegionIndex(regions, regions.length);
+    assertEquals(expectedLfuIndex, actualLfuIndex);
+  }
+
+  /**
+   * Creates an array of regions, and sets one of the regions to have the smallest use-count (i.e. LFU).
+   *
+   * @param numberOfRegions the number of regions to construct.
+   * @param lfuIndex the index of the region that should be the LFU.
+   *
+   * @return the constructed regions.
+   */
+  private MultiplexedMappedByteBuffer.Region[] constructRegionsForLfuTest(final int numberOfRegions, final int lfuIndex) {
+    if (lfuIndex < 0 || lfuIndex >= numberOfRegions) {
+      throw new IllegalArgumentException("lfuIndex must be within the numberOfRegions");
+    }
+
+    final MultiplexedMappedByteBuffer.Region regions[] = new MultiplexedMappedByteBuffer.Region[numberOfRegions];
+    final Random random = new Random();
+    int smallestUseCount = Integer.MAX_VALUE;
+
+    // assign random use counts to each region, and record the smallest use count
+    for (int i = 0; i < numberOfRegions; i++) {
+      final int useCount = 1 + random.nextInt(Integer.MAX_VALUE);
+      final ByteBuffer buffer = ByteBuffer.allocateDirect(0);
+      regions[i] = new MultiplexedMappedByteBuffer.Region(0, (MappedByteBuffer) buffer).setUseCount(useCount);
+      if (useCount < smallestUseCount) {
+        smallestUseCount = useCount;
+      }
+    }
+
+    // set the minimum use count at the correct index
+    regions[lfuIndex].setUseCount(smallestUseCount - 1);
+
+    return regions;
+  }
+
   @Test
   void getBufferUnderflowException() throws IOException {
     final Path path = tempFolder.resolve("getBufferUnderflowException.bin");

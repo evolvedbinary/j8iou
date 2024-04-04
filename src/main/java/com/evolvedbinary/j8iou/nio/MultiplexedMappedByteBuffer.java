@@ -455,23 +455,31 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     return closestAfterRegionIdx;
   }
 
-  private void evictLfuRegion() {
-    int minUseRegionIdx = usedRegions - 1;  // default to the last region to reduce left-shifting when all regions tie-break on LFU
-    long prevUseCount = 0;
-    for (int i = 0; i < usedRegions; i++) {
-      final long useCount = regions[i].useCount();
-      if (useCount < prevUseCount) {
-        minUseRegionIdx = i;
-      }
-    }
+  void evictLfuRegion() {
+    final int lfuRegionIdx = getLfuRegionIndex(regions, usedRegions);
 
     // left shift each item in the regions array by one from minUsedRegionIdx + 1
-    for (int i = minUseRegionIdx; i < usedRegions - 1; i++) {
-      regions[minUseRegionIdx] = regions[minUseRegionIdx + 1];
+    for (int i = lfuRegionIdx; i < usedRegions - 1; i++) {
+      regions[lfuRegionIdx] = regions[lfuRegionIdx + 1];
     }
 
     // record that we now have a free region
     usedRegions--;
+  }
+
+  static int getLfuRegionIndex(final Region[] regions, final int usedRegions) {
+    int lfuRegionIdx = usedRegions - 1;  // default to the last region to reduce left-shifting when all regions tie-break on LFU
+    long lfu = regions[lfuRegionIdx].useCount;
+
+    // iterate right-to-left and check the use count
+    for (int i = lfuRegionIdx - 1; i >= 0; i--) {
+      final long useCount = regions[i].useCount();
+      if (useCount < lfu) {
+        lfuRegionIdx = i;
+        lfu = useCount;
+      }
+    }
+    return lfuRegionIdx;
   }
 
   static void checkBounds(final int off, final int len, final int size) {
@@ -616,8 +624,9 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     }
 
     /* Below here are package-private methods for accessing/modifying state in Unit Tests */
-    void setUseCount(final long useCount) {
+    Region setUseCount(final long useCount) {
       this.useCount = useCount;
+      return this;
     }
   }
 
