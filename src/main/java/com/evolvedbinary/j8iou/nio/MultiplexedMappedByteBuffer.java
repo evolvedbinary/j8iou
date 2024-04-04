@@ -456,7 +456,20 @@ public class MultiplexedMappedByteBuffer implements Closeable {
   }
 
   void evictLfuRegion() {
+    // find the LFU Region
     final int lfuRegionIdx = getLfuRegionIndex(regions, usedRegions);
+    final Region lfuRegion = regions[lfuRegionIdx];
+
+    // ask the OS to flush the buffer of the LFU Region to disk
+    lfuRegion.buffer.force();
+
+    // de-reference the LFU Region
+    regions[lfuRegionIdx] = null;
+
+    if (activeRegionIdx == lfuRegionIdx) {
+      // re-position activeRegionIdx before the lfuRegionIdx that will be removed
+      activeRegionIdx = Math.max(0, lfuRegionIdx - 1);
+    }
 
     // left shift each item in the regions array by one from minUsedRegionIdx + 1
     for (int i = lfuRegionIdx; i < usedRegions - 1; i++) {
@@ -465,6 +478,9 @@ public class MultiplexedMappedByteBuffer implements Closeable {
 
     // record that we now have a free region
     usedRegions--;
+
+    // close the buffer of the de-referenced LFU Region
+    closeMappedByteBuffer(lfuRegion.buffer);
   }
 
   static int getLfuRegionIndex(final Region[] regions, final int usedRegions) {
