@@ -62,6 +62,8 @@ public class MultiplexedMappedByteBuffer implements Closeable {
   private final long minBufferSize;
   private final long maxBufferSize;
 
+  // TODO(AR) consider replacing regions and activeRegionIdx with a Linked List of Region (may give before and after for free), also would it perhaps be more performant than array indexed lookup?
+
   /**
    * Regions are always ordered in ascending order of their position within the underlying file channel.
    */
