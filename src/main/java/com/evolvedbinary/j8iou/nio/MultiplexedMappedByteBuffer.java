@@ -488,7 +488,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
 
   @Override
   public void close() throws IOException {
-    @Nullable Exception exceptions[] = null;
+    @Nullable UncheckedIOException exceptions[] = null;
     while (usedRegions > 0) {
       try {
         final MappedByteBuffer buffer = regions[usedRegions - 1].buffer;
@@ -497,7 +497,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
         closeMappedByteBuffer(buffer);
       } catch (final UncheckedIOException e) {
         if (exceptions == null) {
-          exceptions = new Exception[1];
+          exceptions = new UncheckedIOException[1];
         } else {
           exceptions = Arrays.copyOf(exceptions, exceptions.length + 1);
         }
