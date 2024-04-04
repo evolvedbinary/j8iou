@@ -33,10 +33,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.BufferedOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
@@ -1356,6 +1360,81 @@ public class MultiplexedMappedByteBufferTest {
     assertEquals(Long.MAX_VALUE, region.useCount());
     region.incrementUseCount();
     assertEquals(Long.MAX_VALUE, region.useCount());
+  }
+
+  @Test
+  void getSequentialFixedSize() throws IOException {
+    // create  a small test data file.
+    final byte[] pattern = {0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8};
+    final int iterations = 8;
+    final Path sourceFile = writeRepeatingPatternFile("getSequential.bin", iterations, pattern);
+
+    // config for MultiplexedMappedByteBuffer
+    final long minBufferSize = pattern.length;
+    final long maxBufferSize = pattern.length;
+    final int maxBuffers = iterations;
+    final int initialPosition = 0;
+
+    final long actualBufferSize = MultiplexedMappedByteBuffer.calcBufferSize(pattern.length, minBufferSize, maxBufferSize);
+
+    try (final FileChannel fileChannel = FileChannel.open(sourceFile, StandardOpenOption.READ)) {
+      try (final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(fileChannel, FileChannel.MapMode.READ_ONLY, minBufferSize, maxBufferSize, maxBuffers, initialPosition)) {
+        assertEquals(0, buffer.position());
+        assertEquals(0, buffer.fcPosition());
+        assertEquals(0, buffer.nextFcPosition());
+
+        // attempt to read blocks of 8 bytes and check they are the same as the source file
+        try (final InputStream expectedIs = Files.newInputStream(sourceFile, StandardOpenOption.READ)) {
+
+          for (int i = 0; i < iterations; i++) {
+            // read expected bytes and compare to pattern
+            final byte expected[] = new byte[(int) actualBufferSize];
+            expectedIs.read(expected);
+            assertArrayEquals(pattern, expected);
+
+            // read actual bytes and check position
+            final byte actual[] = new byte[(int) actualBufferSize];
+            buffer.get(actual);
+            assertEquals((i + 1) * actualBufferSize, buffer.position(), "Position is wrong for iteration: " + i);
+
+            // compare actual and expected
+            assertArrayEquals(expected, actual);
+
+            // check status of region within the MultiplexedMappedByteBuffer
+            assertEquals(i + 1, buffer.usedRegions());
+            assertEquals(i, buffer.activeRegionIdx());
+            final MultiplexedMappedByteBuffer.Region region = buffer.regions()[i];
+            assertEquals(i * actualBufferSize, region.fcPositionStart);
+            assertEquals(((i + 1) * actualBufferSize) - 1, region.fcPositionEnd);
+            assertEquals(actualBufferSize, region.buffer.capacity());
+            assertEquals(actualBufferSize, region.buffer.position());
+            assertEquals(0, region.buffer.remaining());
+          }
+        }
+
+        // check final status of regions within the MultiplexedMappedByteBuffer
+        assertEquals(iterations, buffer.usedRegions());
+        assertEquals(iterations - 1, buffer.activeRegionIdx());
+        for (int i = 0; i < iterations; i++) {
+          final MultiplexedMappedByteBuffer.Region region = buffer.regions()[i];
+          assertEquals(i * actualBufferSize, region.fcPositionStart);
+          assertEquals(((i + 1) * actualBufferSize) - 1, region.fcPositionEnd);
+          assertEquals(actualBufferSize, region.buffer.capacity());
+          assertEquals(actualBufferSize, region.buffer.position());
+          assertEquals(0, region.buffer.remaining());
+        }
+      }
+    }
+  }
+
+  private Path writeRepeatingPatternFile(final String fileName, final int iterations, final byte[] pattern) throws IOException {
+    final Path path = tempFolder.resolve(fileName);
+    try (final OutputStream os = new BufferedOutputStream(Files.newOutputStream(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE))) {
+      for (int i = 0; i < iterations; i++) {
+        os.write(pattern);
+      }
+    }
+    return path;
   }
 
   @Test

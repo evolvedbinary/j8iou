@@ -304,8 +304,11 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     // 5. record the buffer read for LFU
     region.incrementUseCount();
 
-    // 6. if we could not read all bytes from this region, read again the remaining (from the next region(s))
+    // 6. Advance position by number of bytes read
     final int remainingReadLength = length - readLength;
+    this.nextFcPosition += (readLength - remainingReadLength);
+
+    // 7. if we did not read all bytes from this region, read again the remaining (from the next region(s))
     if (remainingReadLength > 0) {
       getInternal(dst, offset + readLength, remainingReadLength);
     }
@@ -360,16 +363,21 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     final int afterRegionIdx = getClosestRegionIdxAfterPosition();
 
     // sanity check - before and after regions should have consecutive indexes
-    if (beforeRegionIdx == -1 || afterRegionIdx == -1 || afterRegionIdx - beforeRegionIdx != 1) {
+    if (beforeRegionIdx != -1 && afterRegionIdx != -1 && afterRegionIdx - beforeRegionIdx != 1) {
       throw new IllegalStateException("Unable to find insertion point in regions for new mapping a new region");
     }
 
     // calc the maximum requestable space between the needed position and the start of the next region
-    final long maxRequestableSpace = regions[afterRegionIdx].fcPositionStart - nextFcPosition;
+    final long maxRequestableSpace;
+    if (afterRegionIdx == -1) {
+      maxRequestableSpace = maxBufferSize;
+    } else {
+      maxRequestableSpace = regions[afterRegionIdx].fcPositionStart - nextFcPosition;
 
-    // right shift each item in the regions array by one from afterRegionIdx
-    for (int i = usedRegions; i > beforeRegionIdx; i--) {
-      regions[i] = regions[i - 1];
+      // right shift each item in the regions array by one from afterRegionIdx
+      for (int i = usedRegions; i > beforeRegionIdx; i--) {
+        regions[i] = regions[i - 1];
+      }
     }
 
     // record that we now have a new region
@@ -378,10 +386,11 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     // set the value of the new region
     final long min = Math.min(minBufferSize, maxRequestableSpace);
     final MappedByteBuffer buffer = mapRegion(fileChannel, mapMode, maxRequestableSpace, min, maxBufferSize, nextFcPosition);
-    regions[afterRegionIdx] = new Region(nextFcPosition, buffer);
+    final int newRegionIdx = beforeRegionIdx + 1;
+    regions[newRegionIdx] = new Region(nextFcPosition, buffer);
 
     // return the index of the new region
-    return afterRegionIdx;
+    return newRegionIdx;
   }
 
   /**
@@ -482,7 +491,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
       try {
         final MappedByteBuffer buffer = regions[usedRegions - 1].buffer;
         buffer.force();  // ask the OS to flush the buffer to disk
-        regions[usedRegions--] = null;
+        regions[--usedRegions] = null;
         closeMappedByteBuffer(buffer);
       } catch (final UncheckedIOException e) {
         if (exceptions == null) {
