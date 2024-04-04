@@ -300,7 +300,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
       throw new IndexOutOfBoundsException("Region offset is out of bounds");
     }
     region.buffer.position((int) regionOffset);
-    final int readLength = Math.max(region.buffer.remaining(), length);
+    final int readLength = Math.min(region.buffer.remaining(), length);
     region.buffer.get(dst, offset, readLength);
 
     // 5. record the buffer read for LFU
@@ -310,7 +310,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     final int remainingReadLength = length - readLength;
     this.nextFcPosition += (readLength - remainingReadLength);
 
-    // 7. if we did not read all bytes from this region, read again the remaining (from the next region(s))
+    // 7. if we read less than length bytes from this region, read again the remaining bytes (from the next region(s))
     if (remainingReadLength > 0) {
       getInternal(dst, offset + readLength, remainingReadLength);
     }

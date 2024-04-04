@@ -1483,20 +1483,57 @@ public class MultiplexedMappedByteBufferTest {
     });
   }
 
-  @Test
-  void getSequentialFixedSize() throws IOException {
+  @ParameterizedTest(name = "[{index}] getAllSequential(sequenceLength={0}, iterations={1}, minBufferSize={2}, maxBufferSize={3}, maxBuffers{4})")
+  @CsvSource({
+      "1, 1, 0, 2, 1",
+      "1, 1, 1, 1, 1",
+      "1, 2, 1, 1, 2",
+
+      "2, 2, 1, 4, 2",
+      "2, 2, 2, 2, 2",
+      "2, 4, 2, 2, 4",
+
+      "4, 4, 2, 8, 4",
+      "4, 4, 4, 4, 4",
+      "4, 8, 4, 4, 8",
+
+      "8, 8,  4, 16, 8",
+      "8, 8,  8, 8,  8",
+      "8, 16, 8, 8,  16",
+
+      "16, 16, 8,  32, 16",
+      "16, 16, 16, 16, 16",
+      "16, 32, 16, 16, 32",
+
+      "32, 32, 16, 64, 32",
+      "32, 32, 32, 32, 32",
+      "32, 64, 32, 32, 64",
+
+      "64, 64,  32, 128, 64",
+      "64, 64,  64, 64,  64",
+      "64, 128, 64, 64,  128",
+
+      "128, 128, 64,  256, 128",
+      "128, 128, 128, 128, 128",
+      "128, 256, 128, 128, 256",
+
+      "256, 256, 128, 512, 256",
+      "256, 256, 256, 256, 256",
+      "256, 512, 256, 256, 512",
+  })
+  void getAllSequential(final short sequenceLength, final int iterations, final long minBufferSize, final long maxBufferSize, final int maxBuffers) throws IOException {
     // create  a small test data file.
-    final byte[] pattern = {0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8};
-    final int iterations = 8;
-    final Path sourceFile = writeRepeatingPatternFile("getSequential.bin", iterations, pattern);
+    final byte[] sequence = createSequenceFromZero(sequenceLength);
+    final Path sourceFile = writeRepeatingPatternFile("getAllSequential.bin", iterations, sequence);
 
     // config for MultiplexedMappedByteBuffer
-    final long minBufferSize = pattern.length;
-    final long maxBufferSize = pattern.length;
-    final int maxBuffers = iterations;
     final int initialPosition = 0;
 
-    final long actualBufferSize = MultiplexedMappedByteBuffer.calcBufferSize(pattern.length, minBufferSize, maxBufferSize);
+    final long readBufferSize = MultiplexedMappedByteBuffer.calcBufferSize(sequence.length, minBufferSize, maxBufferSize);
+
+    // counters
+    long expectedTotalBytesRead = 0;
+    long actualTotalBytesRead = 0;
 
     try (final FileChannel fileChannel = FileChannel.open(sourceFile, StandardOpenOption.READ)) {
       try (final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(fileChannel, FileChannel.MapMode.READ_ONLY, minBufferSize, maxBufferSize, maxBuffers, initialPosition)) {
@@ -1504,48 +1541,86 @@ public class MultiplexedMappedByteBufferTest {
         assertEquals(0, buffer.fcPosition());
         assertEquals(0, buffer.nextFcPosition());
 
-        // attempt to read blocks of 8 bytes and check they are the same as the source file
+        final long expectedRegionSize = MultiplexedMappedByteBuffer.calcBufferSize(fileChannel.size(), minBufferSize, maxBufferSize);
+        if (expectedRegionSize < readBufferSize) {
+          throw new UnsupportedOperationException("This test is not designed to accommodate regions that are smaller than the read buffer");
+        }
+        final int regionToReadBufferRatio = (int)expectedRegionSize / (int)readBufferSize;
+
+        // attempt to read blocks of actualBufferSize bytes and check they are the same as the source file
         try (final InputStream expectedIs = Files.newInputStream(sourceFile, StandardOpenOption.READ)) {
 
           for (int i = 0; i < iterations; i++) {
             // read expected bytes and compare to pattern
-            final byte expected[] = new byte[(int) actualBufferSize];
-            expectedIs.read(expected);
-            assertArrayEquals(pattern, expected);
+            final byte expected[] = new byte[(int) readBufferSize];
+            final int expectedBytesRead = expectedIs.read(expected);
+            expectedTotalBytesRead += expectedBytesRead;
+            assertArrayEquals(sequence, expected);
 
             // read actual bytes and check position
-            final byte actual[] = new byte[(int) actualBufferSize];
+            final byte actual[] = new byte[(int) readBufferSize];
             buffer.get(actual);
-            assertEquals((i + 1) * actualBufferSize, buffer.position(), "Position is wrong for iteration: " + i);
+            actualTotalBytesRead += readBufferSize;
+            assertEquals((i + 1) * readBufferSize, buffer.position(), "Position is wrong for iteration: " + i);
 
             // compare actual and expected
             assertArrayEquals(expected, actual);
 
             // check status of region within the MultiplexedMappedByteBuffer
-            assertEquals(i + 1, buffer.usedRegions());
-            assertEquals(i, buffer.activeRegionIdx());
-            final MultiplexedMappedByteBuffer.Region region = buffer.regions()[i];
-            assertEquals(i * actualBufferSize, region.fcPositionStart);
-            assertEquals(((i + 1) * actualBufferSize) - 1, region.fcPositionEnd);
-            assertEquals(actualBufferSize, region.buffer.capacity());
-            assertEquals(actualBufferSize, region.buffer.position());
-            assertEquals(0, region.buffer.remaining());
+            final int expectedActiveRegionIdx = i / regionToReadBufferRatio;
+            assertEquals(expectedActiveRegionIdx, buffer.activeRegionIdx());
+            assertEquals(expectedActiveRegionIdx + 1, buffer.usedRegions());
+            final MultiplexedMappedByteBuffer.Region region = buffer.regions()[expectedActiveRegionIdx];
+
+            final long expectedRegionStart = ((i - i % regionToReadBufferRatio) * expectedRegionSize) / regionToReadBufferRatio;
+            assertEquals(expectedRegionStart, region.fcPositionStart);
+            final long expectedRegionEnd = expectedRegionStart + expectedRegionSize - 1;
+            assertEquals(expectedRegionEnd, region.fcPositionEnd);
+            assertEquals(expectedRegionSize, region.buffer.capacity());
+            final long expectedRegionPosition = readBufferSize * ((i % regionToReadBufferRatio) + 1);
+            assertEquals(expectedRegionPosition, region.buffer.position());
+            assertEquals(expectedRegionSize - expectedRegionPosition, region.buffer.remaining());
           }
         }
 
-        // check final status of regions within the MultiplexedMappedByteBuffer
-        assertEquals(iterations, buffer.usedRegions());
-        assertEquals(iterations - 1, buffer.activeRegionIdx());
-        for (int i = 0; i < iterations; i++) {
+        // check final status of all regions within the MultiplexedMappedByteBuffer
+        final int expectedUsedRegions = iterations / regionToReadBufferRatio;
+        assertEquals(expectedUsedRegions, buffer.usedRegions());
+        assertEquals(expectedUsedRegions - 1, buffer.activeRegionIdx());
+
+        for (int i = 0; i < expectedUsedRegions; i++) {
           final MultiplexedMappedByteBuffer.Region region = buffer.regions()[i];
-          assertEquals(i * actualBufferSize, region.fcPositionStart);
-          assertEquals(((i + 1) * actualBufferSize) - 1, region.fcPositionEnd);
-          assertEquals(actualBufferSize, region.buffer.capacity());
-          assertEquals(actualBufferSize, region.buffer.position());
+          assertEquals(i * expectedRegionSize, region.fcPositionStart);
+          assertEquals(((i + 1) * expectedRegionSize) - 1, region.fcPositionEnd);
+          assertEquals(expectedRegionSize, region.buffer.capacity());
+          assertEquals(expectedRegionSize, region.buffer.position());
           assertEquals(0, region.buffer.remaining());
         }
       }
     }
+
+    // check that we read all bytes available
+    assertEquals(Files.size(sourceFile), expectedTotalBytesRead);
+    assertEquals(expectedTotalBytesRead, actualTotalBytesRead);
+  }
+
+  /**
+   * Creates a byte array of a specific length.
+   * The first array entry is 0 and, and each subsequent entry adds 1.
+   *
+   * @param length the length of the array.
+   */
+  private static byte[] createSequenceFromZero(final short length) {
+    if (length < 0 || length > 256) {
+      throw new IllegalArgumentException("Length must be between 0 and 256 inclusive");
+    }
+
+    final byte pattern[] = new byte[length];
+    for (int i = 0; i < length; i++) {
+      pattern[i] = (byte) i;
+    }
+
+    return pattern;
   }
 
   private Path writeRepeatingPatternFile(final String fileName, final int iterations, final byte[] pattern) throws IOException {
