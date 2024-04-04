@@ -37,6 +37,8 @@ import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
@@ -46,7 +48,13 @@ import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Random;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class MultiplexedMappedByteBufferTest {
 
@@ -1360,6 +1368,46 @@ public class MultiplexedMappedByteBufferTest {
     assertEquals(Long.MAX_VALUE, region.useCount());
     region.incrementUseCount();
     assertEquals(Long.MAX_VALUE, region.useCount());
+  }
+
+  @Test
+  void getBufferUnderflowException() throws IOException {
+    final Path path = tempFolder.resolve("getBufferUnderflowException.bin");
+
+    final long minBufferSize = 1024;
+
+    try (final FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.READ)) {
+      try (final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(fileChannel, FileChannel.MapMode.READ_WRITE, minBufferSize, minBufferSize, 10, 0)) {
+        assertThrows(BufferUnderflowException.class, () -> {
+          // file size is 1024 bytes, so trying to read 1024+1 byte into this array from the file channel should underflow
+          final byte data[] = new byte[(int)minBufferSize + 1];
+          buffer.get(data);
+        });
+      }
+    }
+  }
+
+  @Test
+  void getUncheckedIOException() throws IOException {
+    final FileChannel.MapMode mapMode = FileChannel.MapMode.READ_WRITE;
+    final long minBufferSize = 1024;
+    final long initialPosition = 0;
+
+    // setup mocks
+    final FileChannel mockFileChannel = mock(FileChannel.class);
+    final MappedByteBuffer mockMappedByteBuffer = mock(MappedByteBuffer.class);
+    when(mockFileChannel.size())
+        .thenReturn(0l)
+        .thenThrow(new IOException("Unable to get size"));
+    when(mockFileChannel.map(mapMode, initialPosition, minBufferSize))
+        .thenReturn(mockMappedByteBuffer);
+
+    final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(mockFileChannel, mapMode, minBufferSize, minBufferSize, 10, initialPosition);
+    assertThrows(UncheckedIOException.class, () -> {
+      // second invocation to fileChannel#size() in MultiplexedMappedByteBuffer#get(byte[]) via mock should throw UncheckedIOException
+      final byte data[] = new byte[(int)minBufferSize + 1];
+      buffer.get(data);
+    });
   }
 
   @Test
