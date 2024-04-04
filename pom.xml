@@ -88,6 +88,7 @@
             <version>${junit.version}</version>
             <scope>test</scope>
         </dependency>
+
     </dependencies>
 
     <build>
@@ -259,8 +260,9 @@
                             <Build-Tag>${build-tag}</Build-Tag>
                             <Git-Commit>${build-commit}</Git-Commit>
                             <Git-Commit-Abbrev>${build-commit-abbrev}</Git-Commit-Abbrev>
+                            <Git-Commit-Timestamp>${build-tstamp}</Git-Commit-Timestamp>
                             <Build-Version>${build-version}</Build-Version>
-                            <Build-Timestamp>${build-tstamp}</Build-Timestamp>
+                            <Build-Timestamp>${maven.build.timestamp}</Build-Timestamp>
                             <Source-Repository>${project.scm.connection}</Source-Repository>
                             <Description>${project.description}</Description>
                             <Implementation-URL>${project.url}</Implementation-URL>
@@ -283,8 +285,9 @@
                             <Build-Tag>${build-tag}</Build-Tag>
                             <Git-Commit>${build-commit}</Git-Commit>
                             <Git-Commit-Abbrev>${build-commit-abbrev}</Git-Commit-Abbrev>
+                            <Git-Commit-Timestamp>${build-tstamp}</Git-Commit-Timestamp>
                             <Build-Version>${build-version}</Build-Version>
-                            <Build-Timestamp>${build-tstamp}</Build-Timestamp>
+                            <Build-Timestamp>${maven.build.timestamp}</Build-Timestamp>
                             <Source-Repository>${project.scm.connection}</Source-Repository>
                             <Description>${project.description}</Description>
                             <Implementation-URL>${project.url}</Implementation-URL>
@@ -300,6 +303,37 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>3.6.3</version>
+                <configuration>
+                    <source>${project.build.source}</source>
+                    <archive>
+                        <manifest>
+                            <addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <Build-Tag>${build-tag}</Build-Tag>
+                            <Git-Commit>${build-commit}</Git-Commit>
+                            <Git-Commit-Abbrev>${build-commit-abbrev}</Git-Commit-Abbrev>
+                            <Git-Commit-Timestamp>${build-tstamp}</Git-Commit-Timestamp>
+                            <Build-Version>${build-version}</Build-Version>
+                            <Build-Timestamp>${maven.build.timestamp}</Build-Timestamp>
+                            <Source-Repository>${project.scm.connection}</Source-Repository>
+                            <Description>${project.description}</Description>
+                            <Implementation-URL>${project.url}</Implementation-URL>
+                        </manifestEntries>
+                    </archive>
+                    <additionalJOptions>
+                        <additionalJOption>-Xmaxerrs</additionalJOption>
+                        <additionalJOption>65536</additionalJOption>
+                        <additionalJOption>-Xmaxwarns</additionalJOption>
+                        <additionalJOption>65536</additionalJOption>
+                    </additionalJOptions>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
