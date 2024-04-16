@@ -160,6 +160,9 @@
                         </goals>
                         <configuration>
                             <failOnWarning>true</failOnWarning>
+                            <ignoredUnusedDeclaredDependencies>
+                                <ignoredUnusedDeclaredDependency>org.junit.jupiter:junit-jupiter-engine</ignoredUnusedDeclaredDependency>
+                            </ignoredUnusedDeclaredDependencies>
                         </configuration>
                     </execution>
                 </executions>
