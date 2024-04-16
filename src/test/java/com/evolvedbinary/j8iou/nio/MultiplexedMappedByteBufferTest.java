@@ -1461,26 +1461,83 @@ public class MultiplexedMappedByteBufferTest {
   }
 
   @Test
-  void getUncheckedIOException() throws IOException {
+  void getUncheckedIOException1() throws IOException {
     final FileChannel.MapMode mapMode = FileChannel.MapMode.READ_WRITE;
     final long minBufferSize = 1024;
     final long initialPosition = 0;
+    final String ioExceptionMessage = "Unable to get size";
 
     // setup mocks
     final FileChannel mockFileChannel = mock(FileChannel.class);
     final MappedByteBuffer mockMappedByteBuffer = mock(MappedByteBuffer.class);
     when(mockFileChannel.size())
         .thenReturn(0l)
-        .thenThrow(new IOException("Unable to get size"));
+        .thenThrow(new IOException(ioExceptionMessage));
     when(mockFileChannel.map(mapMode, initialPosition, minBufferSize))
         .thenReturn(mockMappedByteBuffer);
 
     final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(mockFileChannel, mapMode, minBufferSize, minBufferSize, 10, initialPosition);
-    assertThrows(UncheckedIOException.class, () -> {
+    final UncheckedIOException actualException = assertThrows(UncheckedIOException.class, () -> {
       // second invocation to fileChannel#size() in MultiplexedMappedByteBuffer#get(byte[]) via mock should throw UncheckedIOException
       final byte data[] = new byte[(int)minBufferSize + 1];
       buffer.get(data);
     });
+    assertEquals("Unable to determine size of file channel", actualException.getMessage());
+    assertEquals(ioExceptionMessage, actualException.getCause().getMessage());
+  }
+
+  @Test
+  void getUncheckedIOException2() throws IOException {
+    final FileChannel.MapMode mapMode = FileChannel.MapMode.READ_WRITE;
+    final long minBufferSize = 1024;
+    final long initialPosition = 0;
+    final String ioExceptionMessage = "Unable to map";
+
+    // setup mocks
+    final FileChannel mockFileChannel = mock(FileChannel.class);
+    final MappedByteBuffer mockMappedByteBuffer = (MappedByteBuffer) ByteBuffer.allocateDirect((int)minBufferSize);
+    when(mockFileChannel.size())
+        .thenReturn(2048l);
+    when(mockFileChannel.map(mapMode, initialPosition, minBufferSize))
+        .thenReturn(mockMappedByteBuffer);
+    when(mockFileChannel.map(mapMode, minBufferSize, minBufferSize))
+        .thenThrow(new IOException(ioExceptionMessage));
+
+    final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(mockFileChannel, mapMode, minBufferSize, minBufferSize, 10, initialPosition);
+    final byte data[] = new byte[(int)minBufferSize];
+    buffer.get(data);
+    final UncheckedIOException actualException = assertThrows(UncheckedIOException.class, () -> {
+      // second invocation to fileChannel#map() (via 2nd invocation to buffer#get(byte[])) in MultiplexedMappedByteBuffer#mapRegion(FileChannel, MapMode, long, long, long, long) via mock should throw UncheckedIOException
+      buffer.get(data);
+    });
+    assertEquals("Unable to map a region of the file channel into memory", actualException.getMessage());
+    assertEquals(ioExceptionMessage, actualException.getCause().getMessage());
+  }
+
+  @Test
+  void getIndexOutOfBoundsException() throws IOException {
+    final FileChannel.MapMode mapMode = FileChannel.MapMode.READ_WRITE;
+    final long minBufferSize = 1024;
+    final long initialPosition = 0;
+
+    // setup mocks
+    final FileChannel mockFileChannel = mock(FileChannel.class);
+    final MappedByteBuffer mockMappedByteBuffer = (MappedByteBuffer) ByteBuffer.allocateDirect((int)minBufferSize);
+    when(mockFileChannel.size())
+        .thenReturn(2048l);
+    when(mockFileChannel.map(mapMode, initialPosition, minBufferSize))
+        .thenReturn(mockMappedByteBuffer);
+
+    final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(mockFileChannel, mapMode, minBufferSize, minBufferSize, 10, initialPosition);
+    final byte data[] = new byte[(int)minBufferSize];
+    final IndexOutOfBoundsException actualException = assertThrows(IndexOutOfBoundsException.class, () -> {
+      // NOTE(AR) we intentionally poison the fcPosition of the 1st region to check that the sanity check in MultiplexedMappedByteBuffer#get(byte[]) (below) works
+      buffer.regions()[0] = new MultiplexedMappedByteBuffer.Region(-1l * (1l + Integer.MAX_VALUE), buffer.regions()[0].buffer);
+
+      // should trigger the sanity check to fail and throw an IndexOutOfBoundsException
+      buffer.get(data);
+    });
+    assertEquals("Region offset is out of bounds", actualException.getMessage());
   }
 
   @ParameterizedTest(name = "[{index}] getAllSequential(sequenceLength={0}, iterations={1}, minBufferSize={2}, maxBufferSize={3}, maxBuffers={4})")
