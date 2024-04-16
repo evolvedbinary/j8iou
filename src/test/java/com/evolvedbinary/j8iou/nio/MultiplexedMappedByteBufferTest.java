@@ -1646,12 +1646,17 @@ public class MultiplexedMappedByteBufferTest {
   void getAllSequential(final short sequenceLength, final int iterations, final long minBufferSize, final long maxBufferSize, final int maxBuffers) throws IOException {
     // create  a small test data file.
     final byte[] sequence = createSequenceFromZero(sequenceLength);
-    final Path sourceFile = writeRepeatingPatternFile("getAllSequential.bin", iterations, sequence);
-
-    // config for MultiplexedMappedByteBuffer
-    final int initialPosition = 0;
+    final Path sourceFile = writeRepeatingPatternFile("getAllSequentialForward.bin", iterations, sequence);
 
     final long readBufferSize = MultiplexedMappedByteBuffer.calcBufferSize(sequence.length, minBufferSize, maxBufferSize);
+    final long sourceFileSize = Files.size(sourceFile);
+    final long expectedRegionSize = MultiplexedMappedByteBuffer.calcBufferSize(sourceFileSize, minBufferSize, maxBufferSize);
+    if (expectedRegionSize < readBufferSize) {
+      throw new UnsupportedOperationException("This test is not designed to accommodate regions that are smaller than the read buffer");
+    }
+
+    // config for MultiplexedMappedByteBuffer
+    final long initialPosition = 0;  // start at the start of the file
 
     // counters
     long expectedTotalBytesRead = 0;
@@ -1659,14 +1664,12 @@ public class MultiplexedMappedByteBufferTest {
 
     try (final FileChannel fileChannel = FileChannel.open(sourceFile, StandardOpenOption.READ)) {
       try (final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(fileChannel, FileChannel.MapMode.READ_ONLY, minBufferSize, maxBufferSize, maxBuffers, initialPosition)) {
-        assertEquals(0, buffer.position());
-        assertEquals(0, buffer.fcPosition());
-        assertEquals(0, buffer.nextFcPosition());
+        // NOTE(AR) position in file channel does not change when memory-mapping regions
+        assertEquals(0, buffer.fileChannel().position());
+        assertEquals(initialPosition, buffer.position());
+        assertEquals(initialPosition, buffer.fcPosition());
+        assertEquals(initialPosition, buffer.nextFcPosition());
 
-        final long expectedRegionSize = MultiplexedMappedByteBuffer.calcBufferSize(fileChannel.size(), minBufferSize, maxBufferSize);
-        if (expectedRegionSize < readBufferSize) {
-          throw new UnsupportedOperationException("This test is not designed to accommodate regions that are smaller than the read buffer");
-        }
         final int regionToReadBufferRatio = (int)expectedRegionSize / (int)readBufferSize;
         // do we need to read more data than that provided by maxBuffers, if so buffers will be evicted and new ones mapped in as we go
         final boolean willEvictRegions = maxBuffers * expectedRegionSize < iterations * readBufferSize;
@@ -1678,14 +1681,16 @@ public class MultiplexedMappedByteBufferTest {
             // read expected bytes and compare to pattern
             final byte expected[] = new byte[(int) readBufferSize];
             final int expectedBytesRead = expectedIs.read(expected);
+            assertEquals(readBufferSize, expectedBytesRead);
             expectedTotalBytesRead += expectedBytesRead;
             assertArrayEquals(sequence, expected);
 
             // read actual bytes and check position
+            assertEquals(i * readBufferSize, buffer.position(), "Buffer position is wrong for iteration before read: " + i);
             final byte actual[] = new byte[(int) readBufferSize];
             buffer.get(actual);
             actualTotalBytesRead += readBufferSize;
-            assertEquals((i + 1) * readBufferSize, buffer.position(), "Position is wrong for iteration: " + i);
+            assertEquals((i + 1) * readBufferSize, buffer.position(), "Buffer position is wrong for iteration after read: " + i);
 
             // compare actual and expected
             assertArrayEquals(expected, actual);
@@ -1697,16 +1702,16 @@ public class MultiplexedMappedByteBufferTest {
               expectedActiveRegionIdx = Math.min(expectedActiveRegionIdx, maxBuffers - 1);
             }
             assertEquals(expectedActiveRegionIdx, buffer.activeRegionIdx());
-            assertEquals(expectedActiveRegionIdx + 1, buffer.usedRegions());
+            assertEquals(expectedActiveRegionIdx + 1, buffer.usedRegions(), "The number of expected used regions is wrong for read iteration: " + i);
             final MultiplexedMappedByteBuffer.Region region = buffer.regions()[expectedActiveRegionIdx];
 
             final long expectedRegionStart = ((i - i % regionToReadBufferRatio) * expectedRegionSize) / regionToReadBufferRatio;
-            assertEquals(expectedRegionStart, region.fcPositionStart);
+            assertEquals(expectedRegionStart, region.fcPositionStart, "The expected Region[" + expectedActiveRegionIdx + "] starts at the wrong position for read iteration: " + i);
             final long expectedRegionEnd = expectedRegionStart + expectedRegionSize - 1;
-            assertEquals(expectedRegionEnd, region.fcPositionEnd);
+            assertEquals(expectedRegionEnd, region.fcPositionEnd, "The expected Region[" + expectedActiveRegionIdx + "] ends at the wrong position for read iteration: " + i);
             assertEquals(expectedRegionSize, region.buffer.capacity());
             final long expectedRegionPosition = readBufferSize * ((i % regionToReadBufferRatio) + 1);
-            assertEquals(expectedRegionPosition, region.buffer.position());
+            assertEquals(expectedRegionPosition, region.buffer.position(), "The expected Region[" + expectedActiveRegionIdx + "]'s buffer is at the wrong position for read iteration: " + i);
             assertEquals(expectedRegionSize - expectedRegionPosition, region.buffer.remaining());
           }
         }
@@ -1718,7 +1723,8 @@ public class MultiplexedMappedByteBufferTest {
           expectedUsedRegions = Math.min(expectedUsedRegions, maxBuffers);
         }
         assertEquals(expectedUsedRegions, buffer.usedRegions());
-        assertEquals(expectedUsedRegions - 1, buffer.activeRegionIdx());
+        final int expectedActiveRegionIdx = expectedUsedRegions - 1;  // will always be last region when reading forwards through the file
+        assertEquals(expectedActiveRegionIdx, buffer.activeRegionIdx());
 
         for (int i = 0; i < expectedUsedRegions; i++) {
           final MultiplexedMappedByteBuffer.Region region = buffer.regions()[i];
@@ -1728,14 +1734,14 @@ public class MultiplexedMappedByteBufferTest {
           } else {
             expectedRegionStart = i * expectedRegionSize;
           }
-          assertEquals(expectedRegionStart, region.fcPositionStart);
+          assertEquals(expectedRegionStart, region.fcPositionStart, "Region[" + i + "] starts at the wrong position");
           final long expectedRegionEnd;
           if (willEvictRegions && i == expectedUsedRegions - 1) {
             expectedRegionEnd = (expectedRegionSize * iterations) - 1;
           } else {
             expectedRegionEnd = ((i + 1) * expectedRegionSize) - 1;
           }
-          assertEquals(expectedRegionEnd, region.fcPositionEnd);
+          assertEquals(expectedRegionEnd, region.fcPositionEnd, "Region[" + i + "] ends at the wrong position");
           assertEquals(expectedRegionSize, region.buffer.capacity());
           assertEquals(expectedRegionSize, region.buffer.position());
           assertEquals(0, region.buffer.remaining());
