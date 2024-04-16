@@ -374,7 +374,8 @@ public class MultiplexedMappedByteBuffer implements Closeable {
       maxRequestableSpace = regions[afterRegionIdx].fcPositionStart - nextFcPosition;
 
       // right shift each item in the regions array by one from afterRegionIdx
-      for (int i = usedRegions; i > beforeRegionIdx; i--) {
+      final int minBeforeRegionIdx = Math.max(0, beforeRegionIdx); // NOTE(AR) this guards against beforeRegionIdx being -1 (i.e. there is no existing region before the region we want to insert)
+      for (int i = usedRegions; i > minBeforeRegionIdx; i--) {
         regions[i] = regions[i - 1];
       }
     }

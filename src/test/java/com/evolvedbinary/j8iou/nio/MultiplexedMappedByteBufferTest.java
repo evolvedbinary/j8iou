@@ -37,6 +37,7 @@ import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
@@ -1541,7 +1542,20 @@ public class MultiplexedMappedByteBufferTest {
     assertEquals("Region offset is out of bounds", actualException.getMessage());
   }
 
-  @ParameterizedTest(name = "[{index}] getAllSequential(sequenceLength={0}, iterations={1}, minBufferSize={2}, maxBufferSize={3}, maxBuffers={4})")
+  /**
+   * Creates a test file containing a sequence of length {@code sequenceLength}
+   * that is repeated for n {@code iterations}; the total length of the test file
+   * is {@code sequenceLength * iterations} bytes.
+   *
+   * We then read all bytes sequentially in a forward direction,
+   * i.e. from start (offset=0) to finish (offset=file.size) from the test
+   * file using our {@link MultiplexedMappedByteBuffer} and check that the bytes
+   * read are the same as if we had read them using a {@FileInputStream}.
+   *
+   * We vary a number of parameters around the buffer size and the number of buffers to
+   * have open simultaneously.
+   */
+  @ParameterizedTest(name = "[{index}] getAllSequentialForward(sequenceLength={0}, iterations={1}, minBufferSize={2}, maxBufferSize={3}, maxBuffers={4})")
   @CsvSource({
       "1, 1, 0, 2, 1",
       "1, 1, 1, 1, 1",
@@ -1644,7 +1658,7 @@ public class MultiplexedMappedByteBufferTest {
       "256, 512, 256, 256, 256",
       "256, 512, 256, 256, 512",
   })
-  void getAllSequential(final short sequenceLength, final int iterations, final long minBufferSize, final long maxBufferSize, final int maxBuffers) throws IOException {
+  void getAllSequentialForward(final short sequenceLength, final int iterations, final long minBufferSize, final long maxBufferSize, final int maxBuffers) throws IOException {
     // create  a small test data file.
     final byte[] sequence = createSequenceFromZero(sequenceLength);
     final Path sourceFile = writeRepeatingPatternFile("getAllSequentialForward.bin", iterations, sequence);
@@ -1742,6 +1756,228 @@ public class MultiplexedMappedByteBufferTest {
           } else {
             expectedRegionEnd = ((i + 1) * expectedRegionSize) - 1;
           }
+          assertEquals(expectedRegionEnd, region.fcPositionEnd, "Region[" + i + "] ends at the wrong position");
+          assertEquals(expectedRegionSize, region.buffer.capacity());
+          assertEquals(expectedRegionSize, region.buffer.position());
+          assertEquals(0, region.buffer.remaining());
+        }
+      }
+    }
+
+    // check that we read all bytes available
+    assertEquals(Files.size(sourceFile), expectedTotalBytesRead);
+    assertEquals(expectedTotalBytesRead, actualTotalBytesRead);
+  }
+
+  @ParameterizedTest(name = "[{index}] getAllSequentialBackward(sequenceLength={0}, iterations={1}, minBufferSize={2}, maxBufferSize={3}, maxBuffers={4})")
+  @CsvSource({
+//      "1, 1, 0, 2, 1",
+//      "1, 1, 1, 1, 1",
+//      "1, 2, 1, 1, 1",
+//      "1, 2, 1, 1, 2",
+//
+//      "2, 2,  1, 4, 2",
+//      "2, 2,  2, 2, 2",
+//      "2, 4,  2, 2, 2",
+//      "2, 2,  2, 2, 4",
+//      "2, 2,  2, 2, 8",
+//      "2, 2,  2, 2, 16",
+//      "2, 2,  2, 2, 32",
+//      "2, 4,  2, 2, 4",
+//      "2, 4,  2, 2, 8",
+//      "2, 4,  2, 2, 16",
+//      "2, 4,  2, 2, 32",
+//      "2, 8,  2, 2, 4",
+//      "2, 8,  2, 2, 8",
+//      "2, 8,  2, 2, 16",
+//      "2, 8,  2, 2, 32",
+//      "2, 16, 2, 2, 4",
+//      "2, 16, 2, 2, 8",
+//      "2, 16, 2, 2, 16",
+//      "2, 16, 2, 2, 32",
+//      "2, 32, 2, 2, 4",
+//      "2, 32, 2, 2, 8",
+//      "2, 32, 2, 2, 16",
+//      "2, 32, 2, 2, 32",
+//
+//      "4, 4,  2, 8, 4",
+//      "4, 4,  4, 4, 4",
+//      "4, 8,  4, 4, 4",
+//      "4, 8,  4, 4, 8",
+//      "4, 8,  4, 4, 16",
+//      "4, 8,  4, 4, 32",
+//      "4, 16, 4, 4, 4",
+//      "4, 16, 4, 4, 8",
+//      "4, 16, 4, 4, 16",
+//      "4, 16, 4, 4, 32",
+//      "4, 32, 4, 4, 4",
+//      "4, 32, 4, 4, 8",
+//      "4, 32, 4, 4, 16",
+//      "4, 32, 4, 4, 32",
+
+//      "8, 8,  4, 16, 8",
+      "8, 4,  8, 8,  4",
+      "8, 8,  8, 8,  4",
+      "8, 16, 8, 8,  4",
+      "8, 32, 8, 8,  4",
+      "8, 4,  8, 8,  8",
+      "8, 8,  8, 8,  8",
+      "8, 8,  8, 8,  16",
+      "8, 8,  8, 8,  32",
+      "8, 16, 8, 8,  4",
+      "8, 16, 8, 8,  8",
+      "8, 16, 8, 8,  16",
+      "8, 16, 8, 8,  32",
+      "8, 32, 8, 8,  4",
+      "8, 32, 8, 8,  8",
+      "8, 32, 8, 8,  16",
+      "8, 32, 8, 8,  32",
+
+//      "16, 16, 8,  32, 16",
+//      "16, 16, 16, 16, 4",
+//      "16, 16, 16, 16, 8",
+//      "16, 16, 16, 16, 16",
+//      "16, 32, 16, 16, 4",
+//      "16, 32, 16, 16, 8",
+//      "16, 32, 16, 16, 16",
+//      "16, 32, 16, 16, 32",
+//
+//      "32, 32, 16, 64, 32",
+//      "32, 32, 32, 32, 32",
+//      "32, 64, 32, 32, 32",
+//      "32, 64, 32, 32, 64",
+//      "32, 64, 32, 32, 128",
+//      "32, 128, 32, 32, 32",
+//      "32, 128, 32, 32, 64",
+//      "32, 128, 32, 32, 128",
+//
+//      "64, 64,  32, 128, 64",
+//      "64, 64,  64, 64,  64",
+//      "64, 128, 64, 64,  64",
+//      "64, 128, 64, 64,  128",
+//      "64, 256, 64, 64,  64",
+//      "64, 256, 64, 64,  128",
+//      "64, 256, 64, 64,  256",
+//
+//      "128, 128, 64,  256, 128",
+//      "128, 128, 128, 128, 128",
+//      "128, 256, 128, 128, 128",
+//      "128, 256, 128, 128, 256",
+//      "128, 512, 128, 128, 128",
+//      "128, 512, 128, 128, 256",
+//      "128, 512, 128, 128, 512",
+//
+//      "256, 256, 128, 512, 256",
+//      "256, 256, 256, 256, 256",
+//      "256, 512, 256, 256, 256",
+//      "256, 512, 256, 256, 512",
+
+      //"128, 128, 32,  32, 32",
+
+      // TODO(AR) add tests where the region is smaller than the buffer we are reading into - so that we need to map in a new region to fill the buffer in on one read operation.
+      // TODO(AR) add tests for non-multiples of two, i.e. read part from buffer and then need to read next part from a new buffer that has to be mapped in
+  })
+  void getAllSequentialBackward(final short sequenceLength, final int iterations, final long minBufferSize, final long maxBufferSize, final int maxBuffers) throws IOException {
+    // create  a small test data file.
+    final byte[] sequence = createSequenceFromZero(sequenceLength);
+    final Path sourceFile = writeRepeatingPatternFile("getAllSequentialBackward.bin", iterations, sequence);
+
+    final long readBufferSize = MultiplexedMappedByteBuffer.calcBufferSize(sequence.length, minBufferSize, maxBufferSize);
+    final long sourceFileSize = Files.size(sourceFile);
+    final long expectedRegionSize = MultiplexedMappedByteBuffer.calcBufferSize(sourceFileSize, minBufferSize, maxBufferSize);
+    if (expectedRegionSize < readBufferSize) {
+      throw new UnsupportedOperationException("This test is not designed to accommodate regions that are smaller than the read buffer");
+    }
+
+    // config for MultiplexedMappedByteBuffer
+    final long initialPosition = sourceFileSize - expectedRegionSize;  // start at the end of the file less the size of the buffer we want to read
+
+    // counters
+    long expectedTotalBytesRead = 0;
+    long actualTotalBytesRead = 0;
+
+    try (final FileChannel fileChannel = FileChannel.open(sourceFile, StandardOpenOption.READ)) {
+      try (final MultiplexedMappedByteBuffer buffer = MultiplexedMappedByteBuffer.create(fileChannel, FileChannel.MapMode.READ_ONLY, minBufferSize, maxBufferSize, maxBuffers, initialPosition)) {
+        // NOTE(AR) position in file channel does not change when memory-mapping regions
+        assertEquals(0, buffer.fileChannel().position());
+        assertEquals(initialPosition, buffer.position());
+        assertEquals(initialPosition, buffer.fcPosition());
+        assertEquals(initialPosition, buffer.nextFcPosition());
+
+        final int regionToReadBufferRatio = (int)expectedRegionSize / (int)readBufferSize;
+        // do we need to read more data than that provided by maxBuffers, if so buffers will be evicted and new ones mapped in as we go
+        final boolean willEvictRegions = maxBuffers * expectedRegionSize < iterations * readBufferSize;
+
+        // attempt to read blocks of actualBufferSize bytes and check they are the same as the source file
+        try (final RandomAccessFile expectedIs = new RandomAccessFile(sourceFile.toFile(), "r")) {
+
+          for (int i = 0; i < iterations; i++) {
+            // read expected bytes and compare to pattern
+            final long expectedReadPosition = sourceFileSize - (readBufferSize * (i + 1));
+            expectedIs.seek(expectedReadPosition);
+            final byte expected[] = new byte[(int) readBufferSize];
+            final int expectedBytesRead = expectedIs.read(expected);
+            assertEquals(readBufferSize, expectedBytesRead);
+//            if (expectedBytesRead == -1) {
+//              break;  // exit the for-loop, we have read all the bytes
+//            }
+            expectedTotalBytesRead += expectedBytesRead;
+            assertArrayEquals(sequence, expected);
+
+            // read actual bytes and check position
+            //final long expectedPosition = sourceFileSize - (expectedRegionSize * (i + 1));
+            buffer.position(expectedReadPosition);
+            assertEquals(expectedReadPosition, buffer.position(), "Buffer position is wrong for iteration before read: " + i);
+            final byte actual[] = new byte[(int) readBufferSize];
+            buffer.get(actual);
+            actualTotalBytesRead += readBufferSize;
+            assertEquals(expectedReadPosition + readBufferSize, buffer.position(), "Buffer position is wrong for iteration after read: " + i);
+
+            // compare actual and expected
+            assertArrayEquals(expected, actual);
+
+            // check status of region within the MultiplexedMappedByteBuffer
+            final int expectedActiveRegionIdx = 0;  // will always be zero when reading backwards through the file
+            int expectedUsedRegions = (i / regionToReadBufferRatio) + 1;
+            if (willEvictRegions) {
+              expectedUsedRegions = Math.min(expectedUsedRegions, maxBuffers);
+            }
+            assertEquals(expectedActiveRegionIdx, buffer.activeRegionIdx());
+            assertEquals(expectedUsedRegions, buffer.usedRegions(), "The number of expected used regions is wrong for read iteration: " + i);
+            final MultiplexedMappedByteBuffer.Region region = buffer.regions()[expectedActiveRegionIdx];
+
+//            final long expectedRegionStart = ((i - i % regionToReadBufferRatio) * expectedRegionSize) / regionToReadBufferRatio;
+//            final long expectedRegionStart = sourceFileSize - (((i + 1 - i % regionToReadBufferRatio) * expectedRegionSize) / regionToReadBufferRatio);
+            //final long expectedRegionStart = sourceFileSize - ((i + 1) * expectedRegionSize);
+//            final long expectedRegionStart = sourceFileSize - ((i + 1 - (i % regionToReadBufferRatio)) * expectedRegionSize);
+            final long expectedRegionStart = sourceFileSize - (((i / regionToReadBufferRatio) + 1) * expectedRegionSize);
+            assertEquals(expectedRegionStart, region.fcPositionStart, "The expected Region[" + expectedActiveRegionIdx + "] starts at the wrong position for read iteration: " + i);
+            final long expectedRegionEnd = expectedRegionStart + expectedRegionSize - 1;
+            assertEquals(expectedRegionEnd, region.fcPositionEnd, "The expected Region[" + expectedActiveRegionIdx + "] ends at the wrong position for read iteration: " + i);
+            assertEquals(expectedRegionSize, region.buffer.capacity());
+            final long expectedRegionPosition = expectedRegionSize - (readBufferSize * ((i % regionToReadBufferRatio)));
+            assertEquals(expectedRegionPosition, region.buffer.position(), "The expected Region[" + expectedActiveRegionIdx + "]'s buffer is at the wrong position for read iteration: " + i);
+            assertEquals(expectedRegionSize - expectedRegionPosition, region.buffer.remaining());
+          }
+        }
+
+        // check final status of all regions within the MultiplexedMappedByteBuffer
+        int expectedUsedRegions = iterations / regionToReadBufferRatio;
+        if (willEvictRegions) {
+          // if we need to evict and reuse regions because maxBuffers is not enough to read all bytes without eviction, in a sequential read it will always be the last region that is evicted!
+          expectedUsedRegions = Math.min(expectedUsedRegions, maxBuffers);
+        }
+        assertEquals(expectedUsedRegions, buffer.usedRegions());
+        final int expectedActiveRegionIdx = 0;  // will always be zero when reading backwards through the file
+        assertEquals(expectedActiveRegionIdx, buffer.activeRegionIdx());
+
+        for (int i = 0; i < expectedUsedRegions; i++) {
+          final MultiplexedMappedByteBuffer.Region region = buffer.regions()[i];
+
+          // when reading the file backwards (i.e. end to start, the region cache after use will always have the regions from the start of the file to regionSize * maxBuffers
+          final long expectedRegionStart = i * expectedRegionSize;
+          assertEquals(expectedRegionStart, region.fcPositionStart, "Region[" + i + "] starts at the wrong position");
+          final long expectedRegionEnd = ((i + 1) * expectedRegionSize) - 1;
           assertEquals(expectedRegionEnd, region.fcPositionEnd, "Region[" + i + "] ends at the wrong position");
           assertEquals(expectedRegionSize, region.buffer.capacity());
           assertEquals(expectedRegionSize, region.buffer.position());
