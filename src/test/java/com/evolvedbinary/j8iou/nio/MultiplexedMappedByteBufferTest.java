@@ -88,9 +88,9 @@ public class MultiplexedMappedByteBufferTest {
         assertEquals(FileChannel.MapMode.READ_WRITE, buffer.mapMode());
         // NOTE(AR) initial position in a new file will always be zero, regardless of what was requested
         assertEquals(0, buffer.fileChannel().position());
-        assertEquals(0, buffer.position());
-        assertEquals(0, buffer.fcPosition());
-        assertEquals(0, buffer.nextFcPosition());
+        assertEquals(initialPosition, buffer.position());
+        assertEquals(initialPosition, buffer.fcPosition());
+        assertEquals(initialPosition, buffer.nextFcPosition());
 
         // check min and max buffer sizes
         assertEquals(minBufferSize, buffer.minBufferSize());
@@ -107,8 +107,8 @@ public class MultiplexedMappedByteBufferTest {
         assertArrayEquals(new MultiplexedMappedByteBuffer.Region[maxBuffers - 1], Arrays.copyOfRange(actualRegions, 1, maxBuffers));
 
         // check that the first region is set up correctly
-        assertEquals(0, firstActualRegion.fcPositionStart);
-        assertEquals(minBufferSize - 1, firstActualRegion.fcPositionEnd);
+        assertEquals(initialPosition, firstActualRegion.fcPositionStart);
+        assertEquals(initialPosition + minBufferSize - 1, firstActualRegion.fcPositionEnd);
         assertEquals(0, firstActualRegion.buffer.position());
         assertEquals(minBufferSize, firstActualRegion.buffer.capacity());
         assertEquals(minBufferSize, firstActualRegion.buffer.remaining());

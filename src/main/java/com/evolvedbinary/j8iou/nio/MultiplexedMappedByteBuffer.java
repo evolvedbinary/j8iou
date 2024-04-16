@@ -131,7 +131,7 @@ public class MultiplexedMappedByteBuffer implements Closeable {
 
 
     // NOTE(AR) we use fileChannel.position() below instead of initialPosition as a new file will always start from zero, otherwise if it is an existing file this will be correct anyway
-    return new MultiplexedMappedByteBuffer(fileChannel, mapMode, minBufferSize, maxBufferSize, maxBuffers, fileChannel.position(), initialBuffer);
+    return new MultiplexedMappedByteBuffer(fileChannel, mapMode, minBufferSize, maxBufferSize, maxBuffers, initialPosition, initialBuffer);
   }
 
   /**
