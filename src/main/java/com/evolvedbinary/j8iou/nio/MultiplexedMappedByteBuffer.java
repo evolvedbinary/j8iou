@@ -127,8 +127,8 @@ public class MultiplexedMappedByteBuffer implements Closeable {
     }
 
     // attempt to map the first buffer from the initial position, if there is a problem, an IOException will be thrown
-    final MappedByteBuffer initialBuffer = mapRegion(fileChannel, mapMode, fileChannel.size(), minBufferSize, maxBufferSize, initialPosition);
-
+    final long bufferSize = calcBufferSize(fileChannel.size(), minBufferSize, maxBufferSize);
+    final MappedByteBuffer initialBuffer = mapRegion(fileChannel, mapMode, bufferSize, initialPosition);
 
     // NOTE(AR) we use fileChannel.position() below instead of initialPosition as a new file will always start from zero, otherwise if it is an existing file this will be correct anyway
     return new MultiplexedMappedByteBuffer(fileChannel, mapMode, minBufferSize, maxBufferSize, maxBuffers, initialPosition, initialBuffer);
@@ -139,15 +139,12 @@ public class MultiplexedMappedByteBuffer implements Closeable {
    *
    * @param fileChannel the file channel from which to map a region.
    * @param mapMode the mapping mode of the region.
-   * @param requestedSize the requested size of the memory mapped region
-   * @param minBufferSize the minimum size of the memory mapped region.
-   * @param maxBufferSize the maximum size of the memory mapped region
+   * @param bufferSize the size of the memory mapped region
    * @param position the position in the file that the mapped region starts from.
    *
    * @throws IOException if we cannot map the region from the file channel into memory.
    */
-  static MappedByteBuffer mapRegion(final FileChannel fileChannel, final MapMode mapMode, final long requestedSize, final long minBufferSize, final long maxBufferSize, final long position) throws IOException {
-    final long bufferSize = calcBufferSize(requestedSize, minBufferSize, maxBufferSize);
+  static MappedByteBuffer mapRegion(final FileChannel fileChannel, final MapMode mapMode, final long bufferSize, final long position) throws IOException {
     return fileChannel.map(mapMode, position, bufferSize);
   }
 
@@ -387,7 +384,8 @@ public class MultiplexedMappedByteBuffer implements Closeable {
 
     // set the value of the new region
     final long min = Math.min(minBufferSize, maxRequestableSpace);
-    final MappedByteBuffer buffer = mapRegion(fileChannel, mapMode, maxRequestableSpace, min, maxBufferSize, nextFcPosition);
+    final long bufferSize = calcBufferSize(maxRequestableSpace, minBufferSize, maxBufferSize);
+    final MappedByteBuffer buffer = mapRegion(fileChannel, mapMode, bufferSize, nextFcPosition);
     final int newRegionIdx = beforeRegionIdx + 1;
     regions[newRegionIdx] = new Region(nextFcPosition, buffer);
 

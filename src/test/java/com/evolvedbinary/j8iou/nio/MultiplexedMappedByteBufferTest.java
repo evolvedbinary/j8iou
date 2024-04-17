@@ -181,7 +181,8 @@ public class MultiplexedMappedByteBufferTest {
   void mapRegion(final String name, final long requested, final long min, final long max, final long position, final long expected) throws IOException {
     final Path path = tempFolder.resolve("mapRegion.bin");
     try (final FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.READ)) {
-      final MappedByteBuffer mappedByteBuffer = MultiplexedMappedByteBuffer.mapRegion(fileChannel, FileChannel.MapMode.READ_WRITE, requested, min, max, position);
+      final long bufferSize = MultiplexedMappedByteBuffer.calcBufferSize(requested, min, max);
+      final MappedByteBuffer mappedByteBuffer = MultiplexedMappedByteBuffer.mapRegion(fileChannel, FileChannel.MapMode.READ_WRITE, bufferSize, position);
       assertEquals(expected, mappedByteBuffer.capacity());
       assertEquals(0, mappedByteBuffer.position());
       assertEquals(expected, mappedByteBuffer.remaining());
